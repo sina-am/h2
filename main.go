@@ -178,9 +178,10 @@ func (h *frameHandler) Serialize(writer io.Writer, frame Frame) (int, error) {
 		}
 
 		packet = append(packet, buf.Bytes()...)
-		packet[0] = byte((len(packet) >> 16) & 0xFF)
-		packet[1] = byte((len(packet) >> 8) & 0xFF)
-		packet[2] = byte(len(packet) & 0xFF)
+		length := len(packet) - 9
+		packet[0] = byte((length >> 16) & 0xFF)
+		packet[1] = byte((length >> 8) & 0xFF)
+		packet[2] = byte(length & 0xFF)
 
 		return writer.Write(packet)
 	default:
