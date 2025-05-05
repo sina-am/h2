@@ -2,8 +2,17 @@ package main
 
 import (
 	"bytes"
+	"fmt"
 	"testing"
 )
+
+func bytesRepresentation(b []byte) string {
+	out := ""
+	for i := 0; i < len(b); i++ {
+		out += fmt.Sprintf("%x ", b[i])
+	}
+	return out
+}
 
 func TestNumericRepresentation(t *testing.T) {
 	prefix := uint8(5)
@@ -40,12 +49,13 @@ func TestHeaderFieldEncoding(t *testing.T) {
 	}
 
 	encoder := NewHPackEncoder()
+
 	writer := bytes.Buffer{}
 	if _, err := encoder.Encode(&writer, headerFields); err != nil {
 		t.Error(err)
 	}
 
 	if !bytes.Equal(expected, writer.Bytes()) {
-		t.Errorf("expected %v got %v", expected, writer.Bytes())
+		t.Errorf("\r\nexp %s\r\ngot %s", bytesRepresentation(expected), bytesRepresentation(writer.Bytes()))
 	}
 }
