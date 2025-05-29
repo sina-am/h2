@@ -2,6 +2,7 @@ package main
 
 import (
 	"bytes"
+	"crypto/rand"
 	"encoding/binary"
 	"errors"
 	"fmt"
@@ -26,6 +27,7 @@ const (
 
 	UnsetFlag           FlagType = 0x0
 	SettingAckFlag      FlagType = 0x1
+	DataPaddedFlag      FlagType = 0x08
 	HeaderEndStreamFlag FlagType = 0x1
 	HeaderEndHeaderFlag FlagType = 0x4
 	HeaderPaddingFlag   FlagType = 0x8
@@ -121,6 +123,23 @@ type WindowUpdateFrame struct {
 	WindowSizeIncrement uint32
 }
 
+/*
+DATA frame structure
+    +---------------+
+    |Pad Length? (8)|
+    +---------------+-----------------------------------------------+
+    |                            Data (*)                         ...
+    +---------------------------------------------------------------+
+    |                           Padding (*)                       ...
+    +---------------------------------------------------------------+
+*/
+
+type DataFrame struct {
+	EndStreamFlag FlagType
+	PadLength     uint8
+	Data          []byte
+}
+
 type frameHandler struct {
 	encoder HPackEncoder
 	decoder HPackDecoder
@@ -204,6 +223,34 @@ func (h *frameHandler) Encode(writer io.Writer, frame Frame) (int, error) {
 		packet[3] = byte(WindowUpdateFrameType)
 		binary.BigEndian.PutUint32(packet[5:9], frame.StreamID)
 		binary.BigEndian.PutUint32(packet[9:], frame.Data.(WindowUpdateFrame).WindowSizeIncrement)
+
+		return writer.Write(packet)
+	case DataFrameType:
+		packetLength := 0
+		packet := make([]byte, 9)
+		packet[3] = byte(DataFrameType)                        // Type (8)
+		packet[4] = byte(frame.Flags)                          // Flags (8)
+		binary.BigEndian.PutUint32(packet[5:], frame.StreamID) // StreamID (32)
+
+		dataFrame := frame.Data.(DataFrame)
+		if (frame.Flags & DataPaddedFlag) != 0 {
+			packet = append(packet, byte(dataFrame.PadLength))
+			packetLength += 1
+		}
+		packetLength += len(dataFrame.Data)
+		packet = append(packet, dataFrame.Data...)
+
+		if (frame.Flags & DataPaddedFlag) != 0 {
+			paddingData := make([]byte, dataFrame.PadLength)
+			_, err := rand.Read(paddingData)
+			if err != nil {
+				return 0, err
+			}
+			packet = append(packet, paddingData...)
+		}
+		packet[0] = byte((packetLength >> 16) & 0xFF)
+		packet[1] = byte((packetLength >> 8) & 0xFF)
+		packet[2] = byte(packetLength & 0xFF)
 
 		return writer.Write(packet)
 	default:
@@ -292,6 +339,19 @@ func (h *frameHandler) Decode(reader io.Reader, frame *Frame) error {
 		}
 
 		frame.Data = windowUpdateFrame
+		return nil
+	case DataFrameType:
+		dataFrame := DataFrame{}
+		_, err := reader.Read(packet)
+		if err != nil {
+			return err
+		}
+		if (frame.Flags & DataPaddedFlag) != 0 {
+			dataFrame.PadLength = uint8(packet[0])
+			dataFrame.Data = append(dataFrame.Data, packet[1:frameLength-uint32(dataFrame.PadLength)-1]...)
+		}
+		dataFrame.Data = append(dataFrame.Data, packet...)
+		frame.Data = dataFrame
 		return nil
 	default:
 		return fmt.Errorf("unknown frame type")

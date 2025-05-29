@@ -262,3 +262,67 @@ func TestEncodeWindowUpdateFrame(t *testing.T) {
 		t.Error("encoded data is not equal to expected raw data")
 	}
 }
+func TestEncodeDataFrame(t *testing.T) {
+	expected := []byte{
+		0x00, 0x00, 0x0b, 0x00, 0x01, 0x00, 0x00, 0x00, 0x01,
+		0x48, 0x65, 0x6c, 0x6c, 0x6f, 0x20, 0x77, 0x6f, 0x72,
+		0x6c, 0x64,
+	}
+	frame := Frame{
+		Type:     DataFrameType,
+		StreamID: 1,
+		Flags:    HeaderEndStreamFlag,
+		Data: DataFrame{
+			PadLength: 0,
+			Data:      []byte{0x48, 0x65, 0x6c, 0x6c, 0x6f, 0x20, 0x77, 0x6f, 0x72, 0x6c, 0x64},
+		},
+	}
+
+	var buf = bytes.Buffer{}
+	handler := NewFrameHandler()
+	_, err := handler.Encode(&buf, frame)
+	if err != nil {
+		t.Error(err)
+	}
+
+	if !bytes.Equal(expected, buf.Bytes()) {
+		t.Errorf("expected data: %v got %v", expected, buf.Bytes())
+	}
+}
+func TestDecodeDataFrame(t *testing.T) {
+	expectedFrame := Frame{
+		Type:     DataFrameType,
+		StreamID: 1,
+		Flags:    HeaderEndStreamFlag,
+		Data: DataFrame{
+			PadLength: 0,
+			Data:      []byte{0x48, 0x65, 0x6c, 0x6c, 0x6f, 0x20, 0x77, 0x6f, 0x72, 0x6c, 0x64},
+		},
+	}
+
+	raw := []byte{
+		0x00, 0x00, 0x0b, 0x00, 0x01, 0x00, 0x00, 0x00, 0x01,
+		0x48, 0x65, 0x6c, 0x6c, 0x6f, 0x20, 0x77, 0x6f, 0x72,
+		0x6c, 0x64,
+	}
+
+	handler := NewFrameHandler()
+	frame := Frame{}
+	err := handler.Decode(bytes.NewBuffer(raw), &frame)
+	if err != nil {
+		t.Error(err)
+	}
+
+	if frame.Type != expectedFrame.Type {
+		t.Errorf("expected frame type: %d got %d", expectedFrame.Type, frame.Type)
+	}
+	if frame.StreamID != expectedFrame.StreamID {
+		t.Errorf("expected frame stream ID: %d got %d", expectedFrame.StreamID, frame.StreamID)
+	}
+	if frame.Flags != expectedFrame.Flags {
+		t.Errorf("expected frame flags: %d got %d", expectedFrame.Flags, frame.Flags)
+	}
+	if !bytes.Equal(frame.Data.(DataFrame).Data, expectedFrame.Data.(DataFrame).Data) {
+		t.Errorf("expected data: %v got %v", expectedFrame.Data.(DataFrame).Data, frame.Data.(DataFrame).Data)
+	}
+}
