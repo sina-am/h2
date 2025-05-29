@@ -154,15 +154,9 @@ func encodeStringLiteral(s string, huffmanEncoded bool) []byte {
 
 func decodeStringLiteral(b []byte, huffmanEncoded bool) (string, error) {
 	if huffmanEncoded {
-		panic("huffman decoding is not implemented yet")
+		return HuffmanDecode(b), nil
 	}
-
-	length, err := decodeInteger(b, 7)
-	if err != nil {
-		return "", err
-	}
-
-	return string(b[1 : length+1]), nil
+	return string(b), nil
 }
 
 type HPackEncoder interface {
@@ -263,4 +257,142 @@ func (h *hPackEncoder) Encode(writer io.Writer, headerFields []HeaderField) (int
 	}
 
 	return total_bytes, nil
+}
+
+type HPackDecoder interface {
+	Decode(reader io.Reader, headerFields *[]HeaderField) error
+}
+
+type hPackDecoder struct {
+	dynamicTable []HeaderField
+	table        []HeaderField
+}
+
+func NewHPackDecoder() HPackDecoder {
+	return &hPackDecoder{
+		dynamicTable: []HeaderField{},
+		table:        staticTable,
+	}
+}
+
+func (h *hPackDecoder) Decode(reader io.Reader, headerFields *[]HeaderField) error {
+	var (
+		n     int = 0
+		err   error
+		value string
+		field string
+	)
+
+	for {
+		bytes := [100]byte{}
+		n, err = reader.Read(bytes[:1])
+		if err != nil {
+			if n == 0 {
+				break
+			}
+			return err
+		}
+
+		if bytes[0] >= 0x80 {
+			// Indexed Header Field Representation
+			bytes[0] -= 0x80
+			index, err := decodeInteger(bytes[:1], 7)
+			if err != nil {
+				return err
+			}
+
+			*headerFields = append(*headerFields, h.table[index])
+		} else if bytes[0] >= 0x40 {
+			// Literal Header Field with Incremental Indexing -- Indexed name
+			bytes[0] -= 0x40
+			index, err := decodeInteger(bytes[:1], 6)
+			if err != nil {
+				return err
+			}
+
+			// Decode value
+			_, err = reader.Read(bytes[:1])
+			if err != nil {
+				return err
+			}
+
+			huffmanEncoded := bytes[0] > 0x80
+			if huffmanEncoded {
+				bytes[0] -= 0x80
+			}
+
+			length, err := decodeInteger(bytes[:1], 7)
+			if err != nil {
+				return err
+			}
+
+			n, err = reader.Read(bytes[:length])
+			if err != nil {
+				return err
+			}
+			value, err = decodeStringLiteral(bytes[:n], huffmanEncoded)
+			if err != nil {
+				return err
+			}
+			newHeader := HeaderField{name: h.table[index].name, value: value}
+			*headerFields = append(*headerFields, newHeader)
+			h.table = append(h.table, newHeader)
+		} else if bytes[0] == 0 {
+			// Literal Header Field without Indexing -- New Name
+
+			// Read the header field
+			_, err = reader.Read(bytes[:1])
+			if err != nil {
+				return err
+			}
+
+			huffmanEncoded := bytes[0] > 0x80
+			if huffmanEncoded {
+				bytes[0] -= 0x80
+			}
+			length, err := decodeInteger(bytes[:1], 6)
+			if err != nil {
+				return err
+			}
+
+			n, err = reader.Read(bytes[:length])
+			if err != nil {
+				return err
+			}
+			field, err = decodeStringLiteral(bytes[:n], huffmanEncoded)
+			if err != nil {
+				return err
+			}
+			// Read the header value
+			_, err = reader.Read(bytes[:1])
+			if err != nil {
+				return err
+			}
+
+			huffmanEncoded = bytes[0] > 0x80
+			if huffmanEncoded {
+				bytes[0] -= 0x80
+			}
+			length, err = decodeInteger(bytes[:1], 6)
+			if err != nil {
+				return err
+			}
+
+			n, err = reader.Read(bytes[:length])
+			if err != nil {
+				return err
+			}
+			value, err = decodeStringLiteral(bytes[:n], huffmanEncoded)
+			if err != nil {
+				return err
+			}
+
+			*headerFields = append(*headerFields, HeaderField{name: field, value: value})
+		}
+
+		if n == 0 {
+			break
+		}
+	}
+	return nil
 }

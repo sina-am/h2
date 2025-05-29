@@ -5,6 +5,9 @@ import "strconv"
 // TODO: Implementation is so fucking stupid. Write a better one
 
 var huffmanCodes = map[rune]string{
+	'-':  "010110",
+	' ':  "010100",
+	',':  "11111010",
 	'/':  "011000",
 	'0':  "00000",
 	'1':  "00001",
@@ -86,6 +89,7 @@ var huffmanCodes = map[rune]string{
 	'|':  "11111111100",
 	'}':  "11111111111101",
 	'~':  "1111111111101",
+	'"':  "1111111001",
 }
 
 func HuffmanEncode(s string) []byte {
@@ -121,6 +125,8 @@ func HuffmanEncode(s string) []byte {
 }
 
 var huffmanDecodeCodes = map[string]rune{
+	"010100":               ' ',
+	"11111010":             ',',
 	"011000":               '/',
 	"00000":                '0',
 	"00001":                '1',
@@ -202,6 +208,8 @@ var huffmanDecodeCodes = map[string]rune{
 	"11111111100":          '|',
 	"11111111111101":       '}',
 	"1111111111101":        '~',
+	"1111111001":           '"',
+	"010110":               '-',
 }
 
 func HuffmanDecode(b []byte) string {
