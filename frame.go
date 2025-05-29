@@ -19,9 +19,10 @@ type (
 )
 
 const (
-	DataFrameType    FrameType = 0x00
-	HeaderFrameType  FrameType = 0x01
-	SettingFrameType FrameType = 0x04
+	DataFrameType         FrameType = 0x00
+	HeaderFrameType       FrameType = 0x01
+	SettingFrameType      FrameType = 0x04
+	WindowUpdateFrameType FrameType = 0x08
 
 	UnsetFlag           FlagType = 0x0
 	SettingAckFlag      FlagType = 0x1
@@ -108,6 +109,17 @@ type HeaderFrame struct {
 	HeaderFields []HeaderField
 }
 
+/*
+Window update frame structure
+
+		+-+-------------------------------------------------------------+
+	    |R|              Window Size Increment (31)                     |
+	    +-+-------------------------------------------------------------+
+*/
+type WindowUpdateFrame struct {
+	WindowSizeIncrement uint32
+}
+
 type frameHandler struct {
 	encoder HPackEncoder
 	decoder HPackDecoder
@@ -185,6 +197,14 @@ func (h *frameHandler) Encode(writer io.Writer, frame Frame) (int, error) {
 		packet[2] = byte(length & 0xFF)
 
 		return writer.Write(packet)
+	case WindowUpdateFrameType:
+		packet := make([]byte, 9+4)
+		packet[2] = 4 // Length
+		packet[3] = byte(WindowUpdateFrameType)
+		binary.BigEndian.PutUint32(packet[5:9], frame.StreamID)
+		binary.BigEndian.PutUint32(packet[9:], frame.Data.(WindowUpdateFrame).WindowSizeIncrement)
+
+		return writer.Write(packet)
 	default:
 		return 0, fmt.Errorf("invalid frame type")
 	}
@@ -260,6 +280,17 @@ func (h *frameHandler) Decode(reader io.Reader, frame *Frame) error {
 		}
 
 		frame.Data = headerFrame
+		return nil
+	case WindowUpdateFrameType:
+		_, err := reader.Read(packet)
+		if err != nil {
+			return err
+		}
+		windowUpdateFrame := WindowUpdateFrame{
+			WindowSizeIncrement: binary.BigEndian.Uint32(packet[:4]),
+		}
+
+		frame.Data = windowUpdateFrame
 		return nil
 	default:
 		return fmt.Errorf("unknown frame type")

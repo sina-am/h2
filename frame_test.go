@@ -217,3 +217,48 @@ func TestDecodeHeaderFrame(t *testing.T) {
 		}
 	}
 }
+
+func TestDecodeWindowUpdateFrame(t *testing.T) {
+	expectedRaw := []byte{
+		0x00, 0x00, 0x04, 0x08, 0x00, 0x00, 0x00,
+		0x00, 0x00, 0x7f, 0xff, 0x00, 0x00,
+	}
+
+	frame := Frame{}
+	var buf = bytes.NewBuffer(expectedRaw)
+	handler := NewFrameHandler()
+	err := handler.Decode(buf, &frame)
+	if err != nil {
+		t.Error(err)
+	}
+	windowUpdateFrame := frame.Data.(WindowUpdateFrame)
+
+	if windowUpdateFrame.WindowSizeIncrement != 2147418112 {
+		t.Errorf("expected window size increment: %d got %d", 2147418112, windowUpdateFrame.WindowSizeIncrement)
+	}
+}
+func TestEncodeWindowUpdateFrame(t *testing.T) {
+	expectedRaw := []byte{
+		0x00, 0x00, 0x04, 0x08, 0x00, 0x00, 0x00,
+		0x00, 0xa1, 0x7f, 0xff, 0x00, 0x00,
+	}
+
+	frame := Frame{
+		Type:     WindowUpdateFrameType,
+		StreamID: 0xa1,
+		Data: WindowUpdateFrame{
+			WindowSizeIncrement: 2147418112,
+		},
+	}
+
+	buf := bytes.Buffer{}
+	handler := NewFrameHandler()
+	_, err := handler.Encode(&buf, frame)
+	if err != nil {
+		t.Error(err)
+	}
+
+	if !bytes.Equal(expectedRaw, buf.Bytes()) {
+		t.Error("encoded data is not equal to expected raw data")
+	}
+}
