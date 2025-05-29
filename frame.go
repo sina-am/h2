@@ -25,13 +25,12 @@ const (
 	SettingFrameType      FrameType = 0x04
 	WindowUpdateFrameType FrameType = 0x08
 
-	UnsetFlag           FlagType = 0x0
-	SettingAckFlag      FlagType = 0x1
-	DataPaddedFlag      FlagType = 0x08
-	HeaderEndStreamFlag FlagType = 0x1
-	HeaderEndHeaderFlag FlagType = 0x4
-	HeaderPaddingFlag   FlagType = 0x8
-	HeaderPriorityFlag  FlagType = 0x20
+	UnsetFlag     FlagType = 0x00
+	AckFlag       FlagType = 0x01
+	EndStreamFlag FlagType = 0x01
+	EndHeaderFlag FlagType = 0x04
+	PaddedFlag    FlagType = 0x08
+	PriorityFlag  FlagType = 0x20
 
 	SettingsHeaderTableSize      SettingParam = 1 // 4,096
 	SettingsEnablePush           SettingParam = 2 // true
@@ -78,8 +77,7 @@ unsigned 32-bit value.
 	                     Figure 10: Setting Format
 */
 type SettingFrame struct {
-	AckFlag FlagType
-	Params  map[SettingParam]uint32
+	Params map[SettingParam]uint32
 }
 
 /*
@@ -100,11 +98,6 @@ Headers frame structure
 	Figure 7: HEADERS Frame Payload
 */
 type HeaderFrame struct {
-	EndStreamFlag FlagType
-	EndHeaderFlag FlagType
-	PaddingFlag   FlagType
-	PriorityFlag  FlagType
-
 	StreamDependency uint32
 	PaddingLength    uint8
 	Weight           uint8
@@ -135,9 +128,8 @@ DATA frame structure
 */
 
 type DataFrame struct {
-	EndStreamFlag FlagType
-	PadLength     uint8
-	Data          []byte
+	PadLength uint8
+	Data      []byte
 }
 
 type frameHandler struct {
@@ -168,7 +160,7 @@ func (h *frameHandler) Encode(writer io.Writer, frame Frame) (int, error) {
 		packet[1] = byte((length >> 8) & 0xFF)
 		packet[2] = byte(length & 0xFF)
 		packet[3] = byte(SettingFrameType)                     // Type (8)
-		packet[4] = byte(settingFrame.AckFlag)                 // Flags (8)
+		packet[4] = byte(frame.Flags)                          // Flags (8)
 		binary.BigEndian.PutUint32(packet[5:], frame.StreamID) // StreamID (32)
 
 		index := 9
@@ -187,19 +179,14 @@ func (h *frameHandler) Encode(writer io.Writer, frame Frame) (int, error) {
 		}
 
 		packet := make([]byte, 9)
-		packet[3] = byte(HeaderFrameType) // Type (8)
-		packet[4] = byte(
-			headerFrame.EndStreamFlag |
-				headerFrame.EndHeaderFlag |
-				headerFrame.PaddingFlag |
-				headerFrame.PriorityFlag,
-		) // Flags (8)
+		packet[3] = byte(HeaderFrameType)                      // Type (8)
+		packet[4] = byte(frame.Flags)                          // Flags (8)
 		binary.BigEndian.PutUint32(packet[5:], frame.StreamID) // StreamID (32)
 
-		if headerFrame.PaddingFlag != UnsetFlag {
+		if (frame.Flags & PaddedFlag) != UnsetFlag {
 			packet = append(packet, headerFrame.PaddingLength)
 		}
-		if headerFrame.PriorityFlag != UnsetFlag {
+		if (frame.Flags & PriorityFlag) != UnsetFlag {
 			packet = binary.BigEndian.AppendUint32(packet, headerFrame.StreamDependency)
 			packet = append(packet, headerFrame.Weight)
 		}
@@ -233,14 +220,14 @@ func (h *frameHandler) Encode(writer io.Writer, frame Frame) (int, error) {
 		binary.BigEndian.PutUint32(packet[5:], frame.StreamID) // StreamID (32)
 
 		dataFrame := frame.Data.(DataFrame)
-		if (frame.Flags & DataPaddedFlag) != 0 {
+		if (frame.Flags & PaddedFlag) != 0 {
 			packet = append(packet, byte(dataFrame.PadLength))
 			packetLength += 1
 		}
 		packetLength += len(dataFrame.Data)
 		packet = append(packet, dataFrame.Data...)
 
-		if (frame.Flags & DataPaddedFlag) != 0 {
+		if (frame.Flags & PaddedFlag) != 0 {
 			paddingData := make([]byte, dataFrame.PadLength)
 			_, err := rand.Read(paddingData)
 			if err != nil {
@@ -282,8 +269,7 @@ func (h *frameHandler) Decode(reader io.Reader, frame *Frame) error {
 	switch frame.Type {
 	case SettingFrameType:
 		settingFrame := SettingFrame{
-			AckFlag: frame.Flags & SettingAckFlag,
-			Params:  map[SettingParam]uint32{},
+			Params: map[SettingParam]uint32{},
 		}
 		for i := 0; i < int(frameLength); i += 6 {
 			settingFrame.Params[SettingParam(binary.BigEndian.Uint16(packet[i:i+2]))] = binary.BigEndian.Uint32(packet[i+2 : i+6])
@@ -291,18 +277,13 @@ func (h *frameHandler) Decode(reader io.Reader, frame *Frame) error {
 		frame.Data = settingFrame
 		return nil
 	case HeaderFrameType:
-		headerFrame := HeaderFrame{
-			EndStreamFlag: frame.Flags & HeaderEndStreamFlag,
-			EndHeaderFlag: frame.Flags & HeaderEndHeaderFlag,
-			PaddingFlag:   frame.Flags & HeaderPaddingFlag,
-			PriorityFlag:  frame.Flags & HeaderPriorityFlag,
-		}
+		headerFrame := HeaderFrame{}
 		base := 0
-		if headerFrame.PaddingFlag == HeaderPaddingFlag {
+		if frame.Flags&PaddedFlag != UnsetFlag {
 			headerFrame.PaddingLength = uint8(packet[0])
 			base++
 		}
-		if headerFrame.PriorityFlag == HeaderPriorityFlag {
+		if frame.Flags&PriorityFlag != UnsetFlag {
 			headerFrame.StreamDependency = binary.BigEndian.Uint32(packet[base:4])
 			headerFrame.Weight = uint8(packet[base+4])
 			base += 5
@@ -333,7 +314,7 @@ func (h *frameHandler) Decode(reader io.Reader, frame *Frame) error {
 		return nil
 	case DataFrameType:
 		dataFrame := DataFrame{}
-		if (frame.Flags & DataPaddedFlag) != 0 {
+		if (frame.Flags & PaddedFlag) != 0 {
 			dataFrame.PadLength = uint8(packet[0])
 			dataFrame.Data = append(dataFrame.Data, packet[1:frameLength-uint32(dataFrame.PadLength)-1]...)
 		}

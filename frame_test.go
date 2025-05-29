@@ -18,8 +18,8 @@ func TestEncodeSettingFrame(t *testing.T) {
 	frame := Frame{
 		Type:     SettingFrameType,
 		StreamID: 0,
+		Flags:    UnsetFlag,
 		Data: SettingFrame{
-			AckFlag: UnsetFlag,
 			Params: map[SettingParam]uint32{
 				SettingsMaxConcurrentStreams: 100,
 				SettingsInitialWindowSize:    33554432,
@@ -43,8 +43,8 @@ func TestDecodeSettingFrame(t *testing.T) {
 	expectedFrame := Frame{
 		Type:     SettingFrameType,
 		StreamID: 0,
+		Flags:    UnsetFlag,
 		Data: SettingFrame{
-			AckFlag: UnsetFlag,
 			Params: map[SettingParam]uint32{
 				SettingsMaxConcurrentStreams: 100,
 				SettingsInitialWindowSize:    33554432,
@@ -77,8 +77,8 @@ func TestDecodeSettingFrame(t *testing.T) {
 	settingFrame := frame.Data.(SettingFrame)
 	expectedHeaderFrame := expectedFrame.Data.(SettingFrame)
 
-	if settingFrame.AckFlag != expectedHeaderFrame.AckFlag {
-		t.Errorf("excepted AckFlag flag: %d got %d", expectedHeaderFrame.AckFlag, settingFrame.AckFlag)
+	if frame.Flags != expectedFrame.Flags {
+		t.Errorf("excepted flags: %d got %d", expectedFrame.Flags, frame.Flags)
 	}
 	for key := range settingFrame.Params {
 		if settingFrame.Params[key] != expectedHeaderFrame.Params[key] {
@@ -102,12 +102,8 @@ func TestEncodeHeaderFrame(t *testing.T) {
 	frame := Frame{
 		Type:     HeaderFrameType,
 		StreamID: 1,
+		Flags:    EndHeaderFlag | EndStreamFlag,
 		Data: HeaderFrame{
-			EndStreamFlag: HeaderEndStreamFlag,
-			EndHeaderFlag: HeaderEndHeaderFlag,
-			PaddingFlag:   UnsetFlag,
-			PriorityFlag:  UnsetFlag,
-
 			StreamDependency: 0,
 			PaddingLength:    0,
 			Weight:           0,
@@ -139,12 +135,8 @@ func TestDecodeHeaderFrame(t *testing.T) {
 	expectedFrame := Frame{
 		Type:     HeaderFrameType,
 		StreamID: 1,
+		Flags:    EndStreamFlag | EndHeaderFlag,
 		Data: HeaderFrame{
-			EndStreamFlag: HeaderEndStreamFlag,
-			EndHeaderFlag: HeaderEndHeaderFlag,
-			PaddingFlag:   UnsetFlag,
-			PriorityFlag:  UnsetFlag,
-
 			StreamDependency: 0,
 			PaddingLength:    0,
 			Weight:           0,
@@ -187,18 +179,10 @@ func TestDecodeHeaderFrame(t *testing.T) {
 	headerFrame := frame.Data.(HeaderFrame)
 	expectedHeaderFrame := expectedFrame.Data.(HeaderFrame)
 
-	if headerFrame.EndHeaderFlag != expectedHeaderFrame.EndHeaderFlag {
-		t.Errorf("excepted EndHeaderFlag flag: %d got %d", expectedHeaderFrame.EndHeaderFlag, headerFrame.EndHeaderFlag)
+	if frame.Flags != expectedFrame.Flags {
+		t.Errorf("excepted flags: %d got %d", expectedFrame.Flags, frame.Flags)
 	}
-	if headerFrame.EndStreamFlag != expectedHeaderFrame.EndStreamFlag {
-		t.Errorf("excepted EndStreamFlag flag: %d got %d", expectedHeaderFrame.EndStreamFlag, headerFrame.EndStreamFlag)
-	}
-	if headerFrame.PaddingFlag != expectedHeaderFrame.PaddingFlag {
-		t.Errorf("excepted PaddingFlag flag: %d got %d", expectedHeaderFrame.PaddingFlag, headerFrame.PaddingFlag)
-	}
-	if headerFrame.PriorityFlag != expectedHeaderFrame.PriorityFlag {
-		t.Errorf("excepted PriorityFlag flag: %d got %d", expectedHeaderFrame.PriorityFlag, headerFrame.PriorityFlag)
-	}
+
 	if headerFrame.StreamDependency != expectedHeaderFrame.StreamDependency {
 		t.Errorf("excepted StreamDependency flag: %d got %d", expectedHeaderFrame.StreamDependency, headerFrame.StreamDependency)
 	}
@@ -271,7 +255,7 @@ func TestEncodeDataFrame(t *testing.T) {
 	frame := Frame{
 		Type:     DataFrameType,
 		StreamID: 1,
-		Flags:    HeaderEndStreamFlag,
+		Flags:    EndStreamFlag,
 		Data: DataFrame{
 			PadLength: 0,
 			Data:      []byte{0x48, 0x65, 0x6c, 0x6c, 0x6f, 0x20, 0x77, 0x6f, 0x72, 0x6c, 0x64},
@@ -293,7 +277,7 @@ func TestDecodeDataFrame(t *testing.T) {
 	expectedFrame := Frame{
 		Type:     DataFrameType,
 		StreamID: 1,
-		Flags:    HeaderEndStreamFlag,
+		Flags:    EndStreamFlag,
 		Data: DataFrame{
 			PadLength: 0,
 			Data:      []byte{0x48, 0x65, 0x6c, 0x6c, 0x6f, 0x20, 0x77, 0x6f, 0x72, 0x6c, 0x64},
