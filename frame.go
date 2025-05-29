@@ -145,43 +145,27 @@ func NewFrameHandler() *frameHandler {
 }
 
 func (h *frameHandler) Encode(writer io.Writer, frame Frame) (int, error) {
+	packet := make([]byte, 9)
+	packet[3] = byte(frame.Type)                           // Type (8)
+	packet[4] = byte(frame.Flags)                          // Flags (8)
+	binary.BigEndian.PutUint32(packet[5:], frame.StreamID) // StreamID (32)
+
 	switch frame.Type {
 	case SettingFrameType:
 		settingFrame, ok := frame.Data.(SettingFrame)
 		if !ok {
-			return 0, fmt.Errorf("invalid data")
+			return 0, fmt.Errorf("invalid frame data")
 		}
 
-		length := len(settingFrame.Params) * 6
-
-		packet := make([]byte, 9+length)
-		// Length (24)
-		packet[0] = byte((length >> 16) & 0xFF)
-		packet[1] = byte((length >> 8) & 0xFF)
-		packet[2] = byte(length & 0xFF)
-		packet[3] = byte(SettingFrameType)                     // Type (8)
-		packet[4] = byte(frame.Flags)                          // Flags (8)
-		binary.BigEndian.PutUint32(packet[5:], frame.StreamID) // StreamID (32)
-
-		index := 9
 		for identifier, value := range settingFrame.Params {
-			binary.BigEndian.PutUint16(packet[index:], uint16(identifier)) // 9-11
-			binary.BigEndian.PutUint32(packet[index+2:], value)            // 11-15
-
-			index += 6
+			packet = binary.BigEndian.AppendUint16(packet, uint16(identifier))
+			packet = binary.BigEndian.AppendUint32(packet, value)
 		}
-
-		return writer.Write(packet)
 	case HeaderFrameType:
 		headerFrame, ok := frame.Data.(HeaderFrame)
 		if !ok {
-			return 0, fmt.Errorf("invalid data")
+			return 0, fmt.Errorf("invalid frame data")
 		}
-
-		packet := make([]byte, 9)
-		packet[3] = byte(HeaderFrameType)                      // Type (8)
-		packet[4] = byte(frame.Flags)                          // Flags (8)
-		binary.BigEndian.PutUint32(packet[5:], frame.StreamID) // StreamID (32)
 
 		if (frame.Flags & PaddedFlag) != UnsetFlag {
 			packet = append(packet, headerFrame.PaddingLength)
@@ -191,40 +175,27 @@ func (h *frameHandler) Encode(writer io.Writer, frame Frame) (int, error) {
 			packet = append(packet, headerFrame.Weight)
 		}
 
-		buf := bytes.Buffer{}
-		_, err := h.encoder.Encode(&buf, headerFrame.HeaderFields)
+		buf := bytes.NewBuffer(packet)
+		_, err := h.encoder.Encode(buf, headerFrame.HeaderFields)
 		if err != nil {
 			return 0, err
 		}
-
-		packet = append(packet, buf.Bytes()...)
-		length := len(packet) - 9
-		packet[0] = byte((length >> 16) & 0xFF)
-		packet[1] = byte((length >> 8) & 0xFF)
-		packet[2] = byte(length & 0xFF)
-
-		return writer.Write(packet)
+		packet = buf.Bytes()
 	case WindowUpdateFrameType:
-		packet := make([]byte, 9+4)
-		packet[2] = 4 // Length
-		packet[3] = byte(WindowUpdateFrameType)
-		binary.BigEndian.PutUint32(packet[5:9], frame.StreamID)
-		binary.BigEndian.PutUint32(packet[9:], frame.Data.(WindowUpdateFrame).WindowSizeIncrement)
+		windowUpdateFrame, ok := frame.Data.(WindowUpdateFrame)
+		if !ok {
+			return 0, fmt.Errorf("invalid frame data")
+		}
 
-		return writer.Write(packet)
+		packet = binary.BigEndian.AppendUint32(packet, windowUpdateFrame.WindowSizeIncrement)
 	case DataFrameType:
-		packetLength := 0
-		packet := make([]byte, 9)
-		packet[3] = byte(DataFrameType)                        // Type (8)
-		packet[4] = byte(frame.Flags)                          // Flags (8)
-		binary.BigEndian.PutUint32(packet[5:], frame.StreamID) // StreamID (32)
-
-		dataFrame := frame.Data.(DataFrame)
+		dataFrame, ok := frame.Data.(DataFrame)
+		if !ok {
+			return 0, fmt.Errorf("invalid frame data")
+		}
 		if (frame.Flags & PaddedFlag) != 0 {
 			packet = append(packet, byte(dataFrame.PadLength))
-			packetLength += 1
 		}
-		packetLength += len(dataFrame.Data)
 		packet = append(packet, dataFrame.Data...)
 
 		if (frame.Flags & PaddedFlag) != 0 {
@@ -235,14 +206,15 @@ func (h *frameHandler) Encode(writer io.Writer, frame Frame) (int, error) {
 			}
 			packet = append(packet, paddingData...)
 		}
-		packet[0] = byte((packetLength >> 16) & 0xFF)
-		packet[1] = byte((packetLength >> 8) & 0xFF)
-		packet[2] = byte(packetLength & 0xFF)
-
-		return writer.Write(packet)
 	default:
 		return 0, fmt.Errorf("invalid frame type")
 	}
+
+	frameLength := len(packet) - 9
+	packet[0] = byte((frameLength >> 16) & 0xFF)
+	packet[1] = byte((frameLength >> 8) & 0xFF)
+	packet[2] = byte(frameLength & 0xFF)
+	return writer.Write(packet)
 }
 
 func (h *frameHandler) Decode(reader io.Reader, frame *Frame) error {
