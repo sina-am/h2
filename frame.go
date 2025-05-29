@@ -274,6 +274,10 @@ func (h *frameHandler) Decode(reader io.Reader, frame *Frame) error {
 	frame.Flags = FlagType(packet[4])
 	// Resize packet size
 	packet = make([]byte, int(frameLength))
+	_, err = reader.Read(packet)
+	if err != nil {
+		return err
+	}
 
 	switch frame.Type {
 	case SettingFrameType:
@@ -281,12 +285,8 @@ func (h *frameHandler) Decode(reader io.Reader, frame *Frame) error {
 			AckFlag: frame.Flags & SettingAckFlag,
 			Params:  map[SettingParam]uint32{},
 		}
-		for i := 0; i < int(frameLength)/(6); i++ {
-			_, err := reader.Read(packet[:6])
-			if err != nil {
-				return err
-			}
-			settingFrame.Params[SettingParam(binary.BigEndian.Uint16(packet[:2]))] = binary.BigEndian.Uint32(packet[2:6])
+		for i := 0; i < int(frameLength); i += 6 {
+			settingFrame.Params[SettingParam(binary.BigEndian.Uint16(packet[i:i+2]))] = binary.BigEndian.Uint32(packet[i+2 : i+6])
 		}
 		frame.Data = settingFrame
 		return nil
@@ -297,43 +297,34 @@ func (h *frameHandler) Decode(reader io.Reader, frame *Frame) error {
 			PaddingFlag:   frame.Flags & HeaderPaddingFlag,
 			PriorityFlag:  frame.Flags & HeaderPriorityFlag,
 		}
+		base := 0
 		if headerFrame.PaddingFlag == HeaderPaddingFlag {
-			_, err := reader.Read(packet[:1])
-			if err != nil {
-				return err
-			}
 			headerFrame.PaddingLength = uint8(packet[0])
+			base++
 		}
 		if headerFrame.PriorityFlag == HeaderPriorityFlag {
-			_, err := reader.Read(packet[:5])
-			if err != nil {
-				return err
-			}
-			headerFrame.StreamDependency = binary.BigEndian.Uint32(packet[:4])
-			headerFrame.Weight = uint8(packet[4])
+			headerFrame.StreamDependency = binary.BigEndian.Uint32(packet[base:4])
+			headerFrame.Weight = uint8(packet[base+4])
+			base += 5
 		}
 
-		if err := h.decoder.Decode(reader, &headerFrame.HeaderFields); err != nil {
+		if err := h.decoder.Decode(bytes.NewBuffer(packet[base:]), &headerFrame.HeaderFields); err != nil {
 			return err
 		}
 
-		if headerFrame.PaddingLength != 0 {
-			n, err := reader.Read(packet[:headerFrame.PaddingLength])
-			if err != nil {
-				return err
-			}
-			if n != int(headerFrame.PaddingLength) {
-				return fmt.Errorf("not enough padding")
-			}
-		}
+		// if headerFrame.PaddingLength != 0 {
+		// 	n, err := reader.Read(packet[:headerFrame.PaddingLength])
+		// 	if err != nil {
+		// 		return err
+		// 	}
+		// 	if n != int(headerFrame.PaddingLength) {
+		// 		return fmt.Errorf("not enough padding")
+		// 	}
+		// }
 
 		frame.Data = headerFrame
 		return nil
 	case WindowUpdateFrameType:
-		_, err := reader.Read(packet)
-		if err != nil {
-			return err
-		}
 		windowUpdateFrame := WindowUpdateFrame{
 			WindowSizeIncrement: binary.BigEndian.Uint32(packet[:4]),
 		}
@@ -342,10 +333,6 @@ func (h *frameHandler) Decode(reader io.Reader, frame *Frame) error {
 		return nil
 	case DataFrameType:
 		dataFrame := DataFrame{}
-		_, err := reader.Read(packet)
-		if err != nil {
-			return err
-		}
 		if (frame.Flags & DataPaddedFlag) != 0 {
 			dataFrame.PadLength = uint8(packet[0])
 			dataFrame.Data = append(dataFrame.Data, packet[1:frameLength-uint32(dataFrame.PadLength)-1]...)

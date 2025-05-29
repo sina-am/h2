@@ -36,7 +36,7 @@ func TestEncodeSettingFrame(t *testing.T) {
 	}
 
 	if !bytes.Equal(expected, buf.Bytes()) {
-		t.Error("wrong")
+		t.Errorf("expected data: %v got %v", expected, buf.Bytes())
 	}
 }
 func TestDecodeSettingFrame(t *testing.T) {
