@@ -57,6 +57,7 @@ length payload.
 */
 type Frame struct {
 	Type     FrameType
+	Flags    FlagType
 	StreamID uint32
 	Data     any
 }
@@ -223,14 +224,14 @@ func (h *frameHandler) Decode(reader io.Reader, frame *Frame) error {
 	frameLength := uint32(uint32(packet[0])<<16) + (uint32(packet[1]) << 8) + uint32(packet[2])
 	frame.Type = FrameType(packet[3])
 	frame.StreamID = binary.BigEndian.Uint32(packet[5:9])
-
+	frame.Flags = FlagType(packet[4])
 	// Resize packet size
 	packet = make([]byte, int(frameLength))
 
 	switch frame.Type {
 	case SettingFrameType:
 		settingFrame := SettingFrame{
-			AckFlag: FlagType(packet[4]) & SettingAckFlag,
+			AckFlag: frame.Flags & SettingAckFlag,
 			Params:  map[SettingParam]uint32{},
 		}
 		for i := 0; i < int(frameLength)/(6); i++ {
@@ -244,10 +245,10 @@ func (h *frameHandler) Decode(reader io.Reader, frame *Frame) error {
 		return nil
 	case HeaderFrameType:
 		headerFrame := HeaderFrame{
-			EndStreamFlag: FlagType(packet[4]) & HeaderEndStreamFlag,
-			EndHeaderFlag: FlagType(packet[4]) & HeaderEndHeaderFlag,
-			PaddingFlag:   FlagType(packet[4]) & HeaderPaddingFlag,
-			PriorityFlag:  FlagType(packet[4]) & HeaderPriorityFlag,
+			EndStreamFlag: frame.Flags & HeaderEndStreamFlag,
+			EndHeaderFlag: frame.Flags & HeaderEndHeaderFlag,
+			PaddingFlag:   frame.Flags & HeaderPaddingFlag,
+			PriorityFlag:  frame.Flags & HeaderPriorityFlag,
 		}
 		if headerFrame.PaddingFlag == HeaderPaddingFlag {
 			_, err := reader.Read(packet[:1])
